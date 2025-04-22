@@ -15,13 +15,13 @@ async def create_appointment(appointment: AppointmentCreate):
             .select("duration") \
             .eq("id", appointment.service_id) \
             .execute()
-
+        
         if not service_response.data:
             raise HTTPException(status_code=404, detail="Service not found")
-
+        
         service_duration = service_response.data[0]["duration"]
         end_time = appointment.start_time + timedelta(minutes=service_duration)
-
+        
         # Check for conflicts
         conflict_check = supabase.table("appointments") \
             .select("id") \
@@ -30,53 +30,39 @@ async def create_appointment(appointment: AppointmentCreate):
             .gt("start_time", appointment.start_time.isoformat()) \
             .not_.eq("status", "cancelled") \
             .execute()
-
+        
         if conflict_check.data:
             raise HTTPException(status_code=409, detail="This time slot is already booked")
-
-        # Start transaction
-        response = supabase.rpc('begin_transaction').execute()
-
-        try:
-            # Create appointment
-            appointment_data = {
-                "customer_id": appointment.customer_id,
-                "staff_id": appointment.staff_id,
-                "service_id": appointment.service_id,
-                "start_time": appointment.start_time.isoformat(),
-                "end_time": end_time.isoformat(),
-                "notes": appointment.notes,
-                "status": "booked"
-            }
-
-            response = supabase.table("appointments").insert(appointment_data).execute()
-
-            # Create notification for confirmation
-            notification_data = {
-                "user_id": appointment.customer_id,
-                "appointment_id": response.data[0]["id"],
-                "type": "confirmation", 
-                "delivery_method": "email",
-                "status": "pending"
-            }
-
-            supabase.table("notifications").insert(notification_data).execute()
-
-            # Commit transaction
-            supabase.rpc('commit_transaction').execute()
-
-            return response.data[0]
-
-        except Exception as e:
-            # Rollback transaction on error
-            supabase.rpc('rollback_transaction').execute()
-            raise e
-
+        
+        # Create appointment
+        appointment_data = {
+            "customer_id": appointment.customer_id,
+            "staff_id": appointment.staff_id,
+            "service_id": appointment.service_id,
+            "start_time": appointment.start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "notes": appointment.notes,
+            "status": "booked"
+        }
+        
+        response = supabase.table("appointments").insert(appointment_data).execute()
+        
+        # Create notification for confirmation
+        notification_data = {
+            "user_id": appointment.customer_id,
+            "appointment_id": response.data[0]["id"],
+            "type": "confirmation",
+            "delivery_method": "email",
+            "status": "pending"
+        }
+        
+        supabase.table("notifications").insert(notification_data).execute()
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 
 
